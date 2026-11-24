@@ -1,0 +1,132 @@
+package io.github.marinco.aviation.api;
+
+import io.github.marinco.aviation.domain.exception.AirportNotFoundException;
+import io.github.marinco.aviation.domain.exception.LookupTimeoutException;
+import io.github.marinco.aviation.domain.exception.UpstreamException;
+import io.github.marinco.aviation.domain.exception.UpstreamRateLimitedException;
+import io.github.marinco.aviation.domain.exception.UpstreamTimeoutException;
+import io.github.marinco.aviation.domain.exception.UpstreamUnavailableException;
+import java.net.URI;
+import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/**
+ * Turns every failure into RFC 9457 Problem Details with the request ID. Never includes stack traces, exception
+ * messages or upstream text.
+ */
+@RestControllerAdvice
+class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    static final String TYPE_PREFIX = "urn:aviation-api:problem:";
+
+    @ExceptionHandler(InvalidIcaoException.class)
+    ResponseEntity<ProblemDetail> invalidIcao(InvalidIcaoException e) {
+        return problem(HttpStatus.BAD_REQUEST, "invalid-icao", "Invalid ICAO code", e.getMessage())
+                .build();
+    }
+
+    @ExceptionHandler(AirportNotFoundException.class)
+    ResponseEntity<ProblemDetail> notFound(AirportNotFoundException e) {
+        return problem(
+                        HttpStatus.NOT_FOUND,
+                        "airport-not-found",
+                        "Airport not found",
+                        "No airport with ICAO code " + e.icao())
+                .cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)))
+                .build();
+    }
+
+    @ExceptionHandler(UpstreamUnavailableException.class)
+    ResponseEntity<ProblemDetail> unavailable(UpstreamUnavailableException e) {
+        log.warn("Provider not called: {}", e.reason());
+        return problem(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "upstream-unavailable",
+                        "Airport data temporarily unavailable",
+                        "Try again later.")
+                .retryAfter(e.retryAfter())
+                .build();
+    }
+
+    @ExceptionHandler(UpstreamRateLimitedException.class)
+    ResponseEntity<ProblemDetail> rateLimited(UpstreamRateLimitedException e) {
+        log.warn("Provider rate limited us; Retry-After {} s", e.retryAfter().toSeconds());
+        return problem(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "upstream-unavailable",
+                        "Airport data temporarily unavailable",
+                        "Try again later.")
+                .retryAfter(e.retryAfter())
+                .build();
+    }
+
+    @ExceptionHandler({LookupTimeoutException.class, UpstreamTimeoutException.class})
+    ResponseEntity<ProblemDetail> timeout(UpstreamException e) {
+        log.warn("Provider timed out: {}", e.getMessage());
+        return problem(
+                        HttpStatus.GATEWAY_TIMEOUT,
+                        "upstream-timeout",
+                        "Airport data provider timed out",
+                        "Try again later.")
+                .build();
+    }
+
+    @ExceptionHandler(UpstreamException.class)
+    ResponseEntity<ProblemDetail> upstreamFailed(UpstreamException e) {
+        log.warn("Provider failed: {}", e.getMessage());
+        return problem(HttpStatus.BAD_GATEWAY, "upstream-error", "Airport data provider failed", "Try again later.")
+                .build();
+    }
+
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<ProblemDetail> unexpected(Exception e) {
+        log.error("Unexpected error", e);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "internal-error", "Internal error", null)
+                .build();
+    }
+
+    private static Builder problem(HttpStatus status, String type, String title, String detail) {
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(status, detail);
+        body.setType(URI.create(TYPE_PREFIX + type));
+        body.setTitle(title);
+        body.setProperty("requestId", MDC.get(RequestIdFilter.MDC_KEY));
+        return new Builder(status, body);
+    }
+
+    /** Small builder so each handler reads as one expression. */
+    private static final class Builder {
+        private final HttpStatus status;
+        private final ProblemDetail body;
+        private final HttpHeaders headers = new HttpHeaders();
+
+        Builder(HttpStatus status, ProblemDetail body) {
+            this.status = status;
+            this.body = body;
+        }
+
+        Builder retryAfter(Duration retryAfter) {
+            long seconds = Math.max(1, (long) Math.ceil(retryAfter.toMillis() / 1000.0));
+            headers.set(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
+            return this;
+        }
+
+        Builder cacheControl(CacheControl cacheControl) {
+            headers.setCacheControl(cacheControl);
+            return this;
+        }
+
+        ResponseEntity<ProblemDetail> build() {
+            return ResponseEntity.status(status).headers(headers).body(body);
+        }
+    }
+}
