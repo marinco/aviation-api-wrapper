@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.marinco.aviation.domain.Airport;
 import io.github.marinco.aviation.domain.AirportCache;
 import io.github.marinco.aviation.domain.Location;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -19,6 +20,9 @@ class AirportLookupIT extends IntegrationTestBase {
 
     @Autowired
     AirportCache cache;
+
+    @Autowired
+    MeterRegistry meters;
 
     @Test
     void test01_knownAirportIsFetchedOnceThenServedFromRedis() {
@@ -248,5 +252,70 @@ class AirportLookupIT extends IntegrationTestBase {
                 .isEqualTo("urn:aviation-api:problem:http-404")
                 .jsonPath("$.requestId")
                 .exists();
+    }
+
+    @Test
+    void entriesAreStoredWithTheirTtls() {
+        stubFound("KJFK");
+        UPSTREAM.register(airportRequest("ZZZZ").willReturn(aResponse().withStatus(204)));
+
+        client.get().uri("/api/v1/airports/KJFK").exchange().expectStatus().isOk();
+        client.get().uri("/api/v1/airports/ZZZZ").exchange().expectStatus().isNotFound();
+
+        assertThat(redis.getExpire("airport:v1:KJFK"))
+                .isBetween(
+                        Duration.ofDays(7).toSeconds() - 60, Duration.ofDays(7).toSeconds());
+        assertThat(redis.getExpire("airport:v1:ZZZZ"))
+                .isBetween(
+                        Duration.ofMinutes(10).toSeconds() - 60,
+                        Duration.ofMinutes(10).toSeconds());
+    }
+
+    @Test
+    void hitNearTheEndOfFreshnessGetsAShorterMaxAge() {
+        Airport kjfk = new Airport(
+                "KJFK", "JFK", "Kennedy", new Location("NY", "US", 40.6, -73.7, 4), List.of(), "aviationweather.gov");
+        cache.put("KJFK", kjfk, Instant.now().minus(Duration.ofMinutes(23 * 60 + 30))); // 30 min of freshness left
+
+        String cacheControl = client.get()
+                .uri("/api/v1/airports/KJFK")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectHeader()
+                .valueEquals("X-Cache", "HIT")
+                .returnResult()
+                .getResponseHeaders()
+                .getCacheControl();
+
+        int maxAge = Integer.parseInt(cacheControl.replace("max-age=", ""));
+        assertThat(maxAge).isBetween(1790, 1800);
+        assertThat(upstreamCalls()).isZero();
+    }
+
+    @Test
+    void upstreamTimerIsTaggedWithTheOutcome() {
+        double found = upstreamTimerCount("found");
+        double notFound = upstreamTimerCount("not_found");
+        double clientError = upstreamTimerCount("client_error");
+        stubFound("KJFK");
+        UPSTREAM.register(airportRequest("ZZZZ").willReturn(aResponse().withStatus(204)));
+        UPSTREAM.register(airportRequest("KERR")
+                .willReturn(aResponse().withStatus(400))); // not retried, not counted by the circuit
+
+        client.get().uri("/api/v1/airports/KJFK").exchange().expectStatus().isOk();
+        client.get().uri("/api/v1/airports/ZZZZ").exchange().expectStatus().isNotFound();
+        client.get().uri("/api/v1/airports/KERR").exchange().expectStatus().isEqualTo(502);
+
+        assertThat(upstreamTimerCount("found")).isEqualTo(found + 1);
+        assertThat(upstreamTimerCount("not_found")).isEqualTo(notFound + 1);
+        assertThat(upstreamTimerCount("client_error")).isEqualTo(clientError + 1);
+    }
+
+    private double upstreamTimerCount(String outcome) {
+        var timer = meters.find("airport.upstream.requests")
+                .tags("provider", "aviationweather", "outcome", outcome)
+                .timer();
+        return timer == null ? 0 : timer.count();
     }
 }
