@@ -2,8 +2,8 @@ package io.github.marinco.aviation.api;
 
 import io.github.marinco.aviation.domain.AirportService;
 import io.github.marinco.aviation.domain.CacheStatus;
+import io.github.marinco.aviation.domain.LookupMetrics;
 import io.github.marinco.aviation.domain.LookupResult;
-import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.headers.Header;
@@ -27,11 +27,11 @@ class AirportController {
     private static final Duration MAX_CLIENT_CACHE = Duration.ofHours(1);
 
     private final AirportService airportService;
-    private final MeterRegistry meterRegistry;
+    private final LookupMetrics metrics;
 
-    AirportController(AirportService airportService, MeterRegistry meterRegistry) {
+    AirportController(AirportService airportService, LookupMetrics metrics) {
         this.airportService = airportService;
-        this.meterRegistry = meterRegistry;
+        this.metrics = metrics;
     }
 
     @Operation(summary = "Look up an airport by ICAO code")
@@ -62,20 +62,20 @@ class AirportController {
     @GetMapping("/{icao}")
     ResponseEntity<AirportResponse> getAirport(
             @Parameter(description = "4-character ICAO code, e.g. KJFK", example = "KJFK") @PathVariable String icao) {
-        String code;
-        try {
-            code = IcaoCode.normalize(icao);
-        } catch (InvalidIcaoException e) {
-            meterRegistry
-                    .counter("airport.lookups", "outcome", "invalid", "cache", "none")
-                    .increment();
-            throw e;
-        }
-        LookupResult result = airportService.lookup(code);
+        LookupResult result = airportService.lookup(validIcao(icao));
         return ResponseEntity.ok()
                 .cacheControl(cacheControl(result))
                 .header(CACHE_HEADER, result.cacheStatus().name())
                 .body(AirportResponse.from(result));
+    }
+
+    /** Upper-cased code, or a counted 400 when it isn't four letters or digits. */
+    private String validIcao(String raw) {
+        if (!IcaoCode.isValid(raw)) {
+            metrics.invalid();
+            throw new InvalidIcaoException();
+        }
+        return IcaoCode.normalize(raw);
     }
 
     private static CacheControl cacheControl(LookupResult result) {

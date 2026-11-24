@@ -5,6 +5,7 @@ import io.github.marinco.aviation.cache.RedisAirportCache;
 import io.github.marinco.aviation.domain.AirportCache;
 import io.github.marinco.aviation.domain.AirportProvider;
 import io.github.marinco.aviation.domain.AirportService;
+import io.github.marinco.aviation.domain.LookupMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
@@ -28,12 +29,17 @@ class AppConfig {
     }
 
     @Bean
+    LookupMetrics lookupMetrics(MeterRegistry meterRegistry) {
+        return new LookupMetrics(meterRegistry);
+    }
+
+    @Bean
     AirportService airportService(
             AirportProvider provider,
             AirportCache cache,
             CacheProperties properties,
             Clock clock,
-            MeterRegistry meterRegistry) {
-        return new AirportService(provider, cache, properties.freshFor(), clock, meterRegistry);
+            LookupMetrics metrics) {
+        return new AirportService(provider, cache, properties.freshFor(), clock, metrics);
     }
 }

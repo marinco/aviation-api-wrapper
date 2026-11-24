@@ -13,8 +13,12 @@ final class IcaoCode {
 
     private IcaoCode() {}
 
+    static boolean isValid(String raw) {
+        return raw != null && VALID.matcher(raw).matches();
+    }
+
     static String normalize(String raw) {
-        if (raw == null || !VALID.matcher(raw).matches()) {
+        if (!isValid(raw)) {
             throw new InvalidIcaoException();
         }
         return raw.toUpperCase(Locale.ROOT);

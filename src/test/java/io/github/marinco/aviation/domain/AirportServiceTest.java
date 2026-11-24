@@ -28,7 +28,7 @@ class AirportServiceTest {
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final FakeProvider provider = new FakeProvider();
     private final AirportService service =
-            new AirportService(provider, cache, FRESH, Clock.fixed(NOW, ZoneOffset.UTC), meters);
+            new AirportService(provider, cache, FRESH, Clock.fixed(NOW, ZoneOffset.UTC), new LookupMetrics(meters));
 
     @Test
     void missFetchesStoresAndReturns() {

@@ -318,4 +318,16 @@ class AirportLookupIT extends IntegrationTestBase {
                 .timer();
         return timer == null ? 0 : timer.count();
     }
+
+    @Test
+    void invalidCodesAreCounted() {
+        double before = meters.counter("airport.lookups", "outcome", "invalid", "cache", "none")
+                .count();
+
+        client.get().uri("/api/v1/airports/KJ*").exchange().expectStatus().isBadRequest();
+
+        assertThat(meters.counter("airport.lookups", "outcome", "invalid", "cache", "none")
+                        .count())
+                .isEqualTo(before + 1);
+    }
 }

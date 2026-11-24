@@ -4,7 +4,6 @@ import io.github.marinco.aviation.domain.AirportCache.Found;
 import io.github.marinco.aviation.domain.AirportCache.NotFound;
 import io.github.marinco.aviation.domain.exception.AirportNotFoundException;
 import io.github.marinco.aviation.domain.exception.UpstreamException;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,15 +23,15 @@ public class AirportService {
     private final AirportCache cache;
     private final Duration freshFor;
     private final Clock clock;
-    private final MeterRegistry meterRegistry;
+    private final LookupMetrics metrics;
 
     public AirportService(
-            AirportProvider provider, AirportCache cache, Duration freshFor, Clock clock, MeterRegistry meterRegistry) {
+            AirportProvider provider, AirportCache cache, Duration freshFor, Clock clock, LookupMetrics metrics) {
         this.provider = provider;
         this.cache = cache;
         this.freshFor = freshFor;
         this.clock = clock;
-        this.meterRegistry = meterRegistry;
+        this.metrics = metrics;
     }
 
     /**
@@ -44,7 +43,7 @@ public class AirportService {
         Optional<AirportCache.CacheEntry> cached = cache.get(icao);
 
         if (cached.isPresent() && cached.get() instanceof NotFound) {
-            count("not_found", "hit");
+            metrics.notFound(true);
             throw new AirportNotFoundException(icao);
         }
 
@@ -52,7 +51,7 @@ public class AirportService {
         if (cached.isPresent() && cached.get() instanceof Found found) {
             Duration age = Duration.between(found.fetchedAt(), clock.instant());
             if (age.compareTo(freshFor) < 0) {
-                count("found", "hit");
+                metrics.found(CacheStatus.HIT);
                 return new LookupResult(found.airport(), CacheStatus.HIT, found.fetchedAt(), freshFor.minus(age));
             }
             stale = found;
@@ -69,30 +68,24 @@ public class AirportService {
                         icao,
                         stale.fetchedAt(),
                         e.getMessage());
-                count("found", "stale");
+                metrics.found(CacheStatus.STALE);
                 return new LookupResult(stale.airport(), CacheStatus.STALE, stale.fetchedAt(), Duration.ZERO);
             }
-            count("error", "miss");
+            metrics.failed();
             throw e;
         }
 
         if (fetched.isEmpty()) {
             // A real "not found" replaces any stale copy.
             cache.putNotFound(icao);
-            count("not_found", "miss");
+            metrics.notFound(false);
             log.info("Airport {} not found at provider {}", icao, provider.name());
             throw new AirportNotFoundException(icao);
         }
 
         Instant now = clock.instant();
         cache.put(icao, fetched.get(), now);
-        count("found", "miss");
+        metrics.found(CacheStatus.MISS);
         return new LookupResult(fetched.get(), CacheStatus.MISS, now, freshFor);
-    }
-
-    private void count(String outcome, String cacheTag) {
-        meterRegistry
-                .counter("airport.lookups", "outcome", outcome, "cache", cacheTag)
-                .increment();
     }
 }
