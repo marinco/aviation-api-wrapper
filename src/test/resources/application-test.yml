@@ -1,0 +1,19 @@
+# Small numbers so the integration suite runs in seconds.
+app:
+  upstream:
+    aviationweather:
+      connect-timeout: 500ms
+      read-timeout: 200ms
+  resilience:
+    # Above test 5's 1 s Retry-After wait; test 8 finishes well inside it.
+    time-limit: 3s
+    retry:
+      initial-backoff: 10ms
+      jitter: 0.1
+    circuit-breaker:
+      sliding-window-size: 4
+      minimum-number-of-calls: 4
+      open-duration: 2s
+    rate-limiter:
+      # High, so tests sharing one context never run out of permits. Test 11 sets its own.
+      limit-per-minute: 10000
