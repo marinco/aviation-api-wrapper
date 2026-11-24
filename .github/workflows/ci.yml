@@ -62,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Built once and loaded locally; the smoke test runs exactly this image.
       - name: Build image
