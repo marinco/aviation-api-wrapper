@@ -7,6 +7,7 @@ import io.github.marinco.aviation.domain.Runway;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -64,5 +65,19 @@ class AviationWeatherMapperTest {
         assertThat(AviationWeatherMapper.surface("c")).isEqualTo(Runway.Surface.CONCRETE);
         assertThat(AviationWeatherMapper.surface("G")).isEqualTo(Runway.Surface.UNKNOWN);
         assertThat(AviationWeatherMapper.surface(null)).isEqualTo(Runway.Surface.UNKNOWN);
+    }
+
+    @Test
+    void upperCasingIgnoresTheTurkishDefaultLocale() {
+        Locale original = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            var dto = new AviationWeatherAirportDto("liml", null, null, null, null, null, null, null, List.of());
+
+            assertThat(AviationWeatherMapper.toAirport(dto).icao()).isEqualTo("LIML");
+            assertThat(AviationWeatherMapper.surface("c")).isEqualTo(Runway.Surface.CONCRETE);
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 }
