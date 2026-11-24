@@ -43,6 +43,9 @@ public class RedisAirportCache implements AirportCache {
             if (stored.notFound()) {
                 return Optional.of(new NotFound());
             }
+            if (stored.airport() == null || stored.fetchedAt() == null) {
+                throw new IllegalStateException("Incomplete cache entry");
+            }
             return Optional.of(new Found(stored.airport(), stored.fetchedAt()));
         } catch (RuntimeException e) {
             failed("get", icao, e);

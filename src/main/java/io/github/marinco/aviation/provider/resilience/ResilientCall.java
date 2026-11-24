@@ -32,8 +32,9 @@ import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import org.slf4j.MDC;
@@ -82,17 +83,22 @@ public final class ResilientCall {
         guarded = Retry.decorateSupplier(retry, guarded);
         guarded = Bulkhead.decorateSupplier(bulkhead, guarded);
         Callable<T> task = withMdc(guarded);
+        // We hold the Future ourselves: Resilience4j cancels it only on its own timeout, not when the calling
+        // thread is interrupted, and an abandoned call would keep its bulkhead permit and keep retrying.
+        Future<T> future = executor.submit(task);
         try {
-            return timeLimiter.executeFutureSupplier(() -> executor.submit(task));
+            return timeLimiter.executeFutureSupplier(() -> future);
         } catch (TimeoutException e) {
             throw new LookupTimeoutException(properties.timeLimit(), e);
-        } catch (ExecutionException e) {
-            throw translate(e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new LookupTimeoutException(properties.timeLimit(), e);
+            throw new CancellationException("Lookup interrupted");
         } catch (Exception e) {
             throw translate(e);
+        } finally {
+            if (!future.isDone()) {
+                future.cancel(true);
+            }
         }
     }
 
@@ -174,6 +180,8 @@ public final class ResilientCall {
                 .minimumNumberOfCalls(cb.minimumNumberOfCalls())
                 .failureRateThreshold(cb.failureRateThreshold())
                 .waitDurationInOpenState(cb.openDuration())
+                .permittedNumberOfCallsInHalfOpenState(cb.permittedCallsInHalfOpen())
+                .automaticTransitionFromOpenToHalfOpenEnabled(true)
                 .recordExceptions(
                         UpstreamTimeoutException.class,
                         UpstreamIoException.class,
@@ -188,10 +196,16 @@ public final class ResilientCall {
                 .build();
     }
 
-    private static RateLimiterConfig rateLimiterConfig(ResilienceProperties p) {
+    /**
+     * Permits refill in short steps rather than once a minute, so a burst at the end of one minute and the start of
+     * the next can't add up to twice the limit within seconds.
+     */
+    static RateLimiterConfig rateLimiterConfig(ResilienceProperties p) {
+        Duration period = p.rateLimiter().refreshPeriod();
+        int perPeriod = (int) Math.max(1, Math.ceil(p.rateLimiter().limitPerMinute() * (period.toMillis() / 60_000.0)));
         return RateLimiterConfig.custom()
-                .limitForPeriod(p.rateLimiter().limitPerMinute())
-                .limitRefreshPeriod(Duration.ofMinutes(1))
+                .limitForPeriod(perPeriod)
+                .limitRefreshPeriod(period)
                 .timeoutDuration(p.rateLimiter().timeout())
                 .build();
     }

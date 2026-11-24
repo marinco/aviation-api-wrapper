@@ -6,7 +6,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.context.TestPropertySource;
 
 /** Own Spring context (different property), so its tiny limit can't affect other tests. */
-@TestPropertySource(properties = "app.resilience.rate-limiter.limit-per-minute=2")
+@TestPropertySource(
+        properties = {"app.resilience.rate-limiter.limit-per-minute=2", "app.resilience.rate-limiter.refresh-period=60s"
+        })
 class RateLimitIT extends IntegrationTestBase {
 
     @Test

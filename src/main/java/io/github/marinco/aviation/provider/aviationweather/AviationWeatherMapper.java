@@ -4,6 +4,7 @@ import io.github.marinco.aviation.domain.Airport;
 import io.github.marinco.aviation.domain.Location;
 import io.github.marinco.aviation.domain.Runway;
 import java.util.List;
+import java.util.Locale;
 
 /** Maps aviationweather.gov's shape to ours: trims names, splits runway dimensions, decodes surface codes. */
 final class AviationWeatherMapper {
@@ -23,7 +24,7 @@ final class AviationWeatherMapper {
                 ? List.of()
                 : dto.runways().stream().map(AviationWeatherMapper::toRunway).toList();
         return new Airport(
-                dto.icaoId().trim().toUpperCase(),
+                dto.icaoId().trim().toUpperCase(Locale.ROOT),
                 blankToNull(dto.iataId()),
                 blankToNull(dto.name()),
                 location,
@@ -49,7 +50,7 @@ final class AviationWeatherMapper {
         if (code == null) {
             return Runway.Surface.UNKNOWN;
         }
-        return switch (code.trim().toUpperCase()) {
+        return switch (code.trim().toUpperCase(Locale.ROOT)) {
             case "A" -> Runway.Surface.ASPHALT;
             case "C" -> Runway.Surface.CONCRETE;
             default -> Runway.Surface.UNKNOWN;

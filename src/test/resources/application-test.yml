@@ -1,12 +1,13 @@
-# Small numbers so the integration suite runs in seconds.
+# Small numbers so the integration suite runs in seconds, but no single response has to beat a tight
+# timeout: a cold WireMock on a CI runner can take a few hundred ms for its first answer.
 app:
   upstream:
     aviationweather:
-      connect-timeout: 500ms
-      read-timeout: 200ms
+      connect-timeout: 1s
+      read-timeout: 1s
   resilience:
-    # Above test 5's 1 s Retry-After wait; test 8 finishes well inside it.
-    time-limit: 3s
+    # Above test 5's 1 s Retry-After wait and test 8's three 1 s timeouts. TimeLimitIT sets its own.
+    time-limit: 5s
     retry:
       initial-backoff: 10ms
       jitter: 0.1
@@ -15,5 +16,5 @@ app:
       minimum-number-of-calls: 4
       open-duration: 2s
     rate-limiter:
-      # High, so tests sharing one context never run out of permits. Test 11 sets its own.
+      # High, so tests sharing one context never run out of permits. RateLimitIT sets its own.
       limit-per-minute: 10000

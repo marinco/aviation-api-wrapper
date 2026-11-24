@@ -169,7 +169,7 @@ class AirportLookupIT extends IntegrationTestBase {
         UPSTREAM.register(airportRequest("KJFK")
                 .willReturn(aResponse()
                         .withStatus(200)
-                        .withFixedDelay(500)
+                        .withFixedDelay(1500)
                         .withHeader("Content-Type", "application/json")
                         .withBody(fixture())));
 
@@ -183,7 +183,7 @@ class AirportLookupIT extends IntegrationTestBase {
                 .isEqualTo("urn:aviation-api:problem:upstream-timeout");
 
         int callsAtResponse = upstreamCalls();
-        Thread.sleep(400);
+        Thread.sleep(600);
         assertThat(callsAtResponse).isEqualTo(3);
         assertThat(upstreamCalls()).isEqualTo(callsAtResponse);
     }
@@ -207,5 +207,46 @@ class AirportLookupIT extends IntegrationTestBase {
                 .expectBody()
                 .jsonPath("$.name")
                 .isEqualTo("Kennedy");
+    }
+
+    @Test
+    void corruptCacheEntryIsTreatedAsAMiss() {
+        redis.opsForValue().set("airport:v1:KJFK", "{\"notFound\":false}");
+        stubFound("KJFK");
+
+        client.get()
+                .uri("/api/v1/airports/KJFK")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectHeader()
+                .valueEquals("X-Cache", "MISS");
+    }
+
+    @Test
+    void springErrorsAreProblemDetailsWithRequestId() {
+        client.post()
+                .uri("/api/v1/airports/KJFK")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(405)
+                .expectHeader()
+                .contentType("application/problem+json")
+                .expectBody()
+                .jsonPath("$.type")
+                .isEqualTo("urn:aviation-api:problem:http-405")
+                .jsonPath("$.requestId")
+                .exists();
+
+        client.get()
+                .uri("/api/v1/nothing-here")
+                .exchange()
+                .expectStatus()
+                .isNotFound()
+                .expectBody()
+                .jsonPath("$.type")
+                .isEqualTo("urn:aviation-api:problem:http-404")
+                .jsonPath("$.requestId")
+                .exists();
     }
 }

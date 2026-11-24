@@ -29,6 +29,13 @@ class RetryAfterTest {
     }
 
     @Test
+    void hugeValuesAreCapped() {
+        assertThat(RetryAfter.parse("99999999999999999999", clock)).isEqualTo(RetryAfter.DEFAULT); // not a long
+        assertThat(RetryAfter.parse("9223372036854775807", clock)).isEqualTo(RetryAfter.MAX);
+        assertThat(RetryAfter.parse("86400", clock)).isEqualTo(RetryAfter.MAX);
+    }
+
+    @Test
     void pastDateMeansNoWait() {
         assertThat(RetryAfter.parse("Tue, 24 Nov 2026 11:00:00 GMT", clock)).isZero();
     }

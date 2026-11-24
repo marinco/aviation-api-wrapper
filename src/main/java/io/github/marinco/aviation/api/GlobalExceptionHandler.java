@@ -14,20 +14,39 @@ import org.slf4j.MDC;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
  * Turns every failure into RFC 9457 Problem Details with the request ID. Never includes stack traces, exception
  * messages or upstream text.
  */
 @RestControllerAdvice
-class GlobalExceptionHandler {
+class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     static final String TYPE_PREFIX = "urn:aviation-api:problem:";
+
+    /**
+     * Spring's own errors (unknown path 404, wrong method 405, 406...) come through here: same Problem Details shape,
+     * with our type URI and the request ID.
+     */
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(
+            Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+        // Spring builds the ProblemDetail inside super, so decorate the result rather than the argument.
+        ResponseEntity<Object> response = super.handleExceptionInternal(ex, body, headers, statusCode, request);
+        if (response != null && response.getBody() instanceof ProblemDetail problem) {
+            problem.setType(URI.create(TYPE_PREFIX + "http-" + statusCode.value()));
+            problem.setProperty("requestId", MDC.get(RequestIdFilter.MDC_KEY));
+        }
+        return response;
+    }
 
     @ExceptionHandler(InvalidIcaoException.class)
     ResponseEntity<ProblemDetail> invalidIcao(InvalidIcaoException e) {
@@ -115,7 +134,7 @@ class GlobalExceptionHandler {
         }
 
         Builder retryAfter(Duration retryAfter) {
-            long seconds = Math.max(1, (long) Math.ceil(retryAfter.toMillis() / 1000.0));
+            long seconds = Math.max(1, retryAfter.toSeconds() + (retryAfter.toNanosPart() > 0 ? 1 : 0));
             headers.set(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
             return this;
         }

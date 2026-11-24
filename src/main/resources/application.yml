@@ -4,9 +4,6 @@ spring:
   threads:
     virtual:
       enabled: true
-  mvc:
-    problemdetails:
-      enabled: true
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -31,10 +28,11 @@ app:
     aviationweather:
       base-url: ${UPSTREAM_BASE_URL:https://aviationweather.gov}
       connect-timeout: 1s
-      read-timeout: 2s
+      read-timeout: 1500ms
       user-agent: aviation-api-wrapper/0.1 (+https://github.com/marinco/aviation-api-wrapper)
   resilience:
-    time-limit: 5s
+    # Worst case: 3 attempts x 1.5 s read timeout + backoff (about 0.3 s + 0.6 s with jitter) = about 5.4 s.
+    time-limit: 6s
     bulkhead:
       max-concurrent: 25
     retry:
@@ -48,9 +46,12 @@ app:
       minimum-number-of-calls: 10
       failure-rate-threshold: 50
       open-duration: 30s
+      permitted-calls-in-half-open: 2
     rate-limiter:
       # The upstream blocks clients above 100/min. Per instance: with N replicas use 80/N.
       limit-per-minute: ${UPSTREAM_RATE_LIMIT_PER_MINUTE:80}
+      # Permits refill every 5 s (7 at a time for 80/min), so no burst can reach twice the limit.
+      refresh-period: 5s
       timeout: 100ms
   cache:
     fresh-for: 24h
@@ -61,10 +62,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        # The docker and dev profiles add metrics and prometheus, on a port that isn't public.
+        include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: never
       probes:
         enabled: true
       status:

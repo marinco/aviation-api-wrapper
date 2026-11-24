@@ -18,9 +18,18 @@ public record ResilienceProperties(
     public record Retry(
             int maxAttempts, Duration initialBackoff, double multiplier, double jitter, Duration maxRetryAfter) {}
 
+    /** @param permittedCallsInHalfOpen trial calls let through after the open period before deciding again */
     public record CircuitBreaker(
-            int slidingWindowSize, int minimumNumberOfCalls, float failureRateThreshold, Duration openDuration) {}
+            int slidingWindowSize,
+            int minimumNumberOfCalls,
+            float failureRateThreshold,
+            Duration openDuration,
+            int permittedCallsInHalfOpen) {}
 
-    /** @param timeout how long a call may wait for a permit */
-    public record RateLimiter(int limitPerMinute, Duration timeout) {}
+    /**
+     * @param limitPerMinute the average rate; permits are handed out per {@code refreshPeriod} in proportion
+     * @param refreshPeriod how often permits refill
+     * @param timeout how long a call may wait for a permit
+     */
+    public record RateLimiter(int limitPerMinute, Duration refreshPeriod, Duration timeout) {}
 }

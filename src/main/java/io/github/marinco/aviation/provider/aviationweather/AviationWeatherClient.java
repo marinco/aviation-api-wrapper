@@ -17,7 +17,9 @@ import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -69,9 +71,9 @@ class AviationWeatherClient {
             log.warn("Upstream lookup {} failed after {} ms: {}", icao, ms(started), e.toString());
             throw new UpstreamIoException("Upstream I/O error", e);
         } catch (InterruptedException e) {
-            // The time limit cancelled us; stop here and let the guards report the timeout.
+            // The time limit cancelled us. Not an upstream failure: not retried, not counted by the circuit breaker.
             Thread.currentThread().interrupt();
-            throw new UpstreamIoException("Upstream call interrupted", e);
+            throw new CancellationException("Upstream call cancelled");
         }
         log.info("Upstream lookup {} -> {} in {} ms", icao, response.statusCode(), ms(started));
         return handle(icao, response);
@@ -111,7 +113,11 @@ class AviationWeatherClient {
         }
         try {
             List<AviationWeatherAirportDto> airports = jsonMapper.readValue(body, AIRPORT_LIST);
+            if (airports == null) {
+                throw new UpstreamBadResponseException("Upstream body was JSON null", null);
+            }
             return airports.stream()
+                    .filter(Objects::nonNull)
                     .filter(a -> a.icaoId() != null && a.icaoId().trim().equalsIgnoreCase(icao))
                     .findFirst();
         } catch (JacksonException e) {

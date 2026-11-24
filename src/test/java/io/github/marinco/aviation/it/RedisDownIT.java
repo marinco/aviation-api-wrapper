@@ -59,6 +59,8 @@ class RedisDownIT {
     @Test
     void test10_redisOutageFallsBackToUpstream() {
         WireMock upstream = new WireMock(Containers.WIREMOCK.getHost(), Containers.WIREMOCK.getMappedPort(8080));
+        upstream.resetMappings(); // other classes share this WireMock
+        upstream.resetRequests();
         upstream.register(get(urlPathEqualTo("/api/data/airport"))
                 .withQueryParam("ids", equalTo("KRDS"))
                 .willReturn(aResponse()

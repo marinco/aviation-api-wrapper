@@ -57,7 +57,7 @@ Every response has `X-Request-Id` (yours if you send a safe one, otherwise a new
 
 ### Errors
 
-Errors are [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) with a `requestId`. They never contain stack traces, exception messages or upstream text.
+Errors are [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) with a `requestId`, including Spring's own errors (unknown path 404, wrong method 405). They never contain stack traces, exception messages or upstream text.
 
 | Status | When | Headers |
 | --- | --- | --- |
@@ -66,7 +66,7 @@ Errors are [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) wi
 | 404 | The provider says no such airport (upstream 204 or `[]`); remembered for 10 min | `Cache-Control: max-age=300` |
 | 502 | Upstream 5xx or 403 after retries, other 4xx, or a body we can't parse | |
 | 503 | We didn't call upstream: circuit open, local rate limit, too many lookups in flight, or upstream 429 with a long `Retry-After` | `Retry-After` |
-| 504 | The upstream timed out, or the whole lookup ran past 5 s | |
+| 504 | The upstream timed out, or the whole lookup ran past 6 s | |
 
 Any 502, 503 or 504 becomes a 200 `STALE` when an older cached copy exists. A "not found" never does.
 
@@ -98,10 +98,14 @@ Integration tests need Docker. They use Testcontainers to start a real Redis and
 | 5 | 429 with `Retry-After: 1`, then 200; separately 429 with `Retry-After: 30` | 200 after waiting; 503 + `Retry-After: 30` after one call, circuit still closed |
 | 6 | Upstream always 500 | 502, then the circuit opens: 503 without calling upstream; readiness stays UP |
 | 7 | Circuit open, then upstream recovers | Half-open trial succeeds, 200 |
-| 8 | Upstream slower than the read timeout | 504; no upstream calls continue after the response |
+| 8 | Upstream slower than the read timeout | 504 after 3 attempts; no upstream calls continue after the response |
+| 8b | Upstream slower than the overall time limit | 504 within the limit; the attempt is cancelled and never retried |
 | 9 | Upstream failing, 25 h old entry in Redis | 200 `STALE`, `Cache-Control: no-cache` |
 | 10 | Redis paused | 200 straight from upstream; cache-error metric goes up |
 | 11 | Local rate limit of 2/min | Third lookup is 503 and never reaches upstream |
+| | Also: corrupt Redis entry, POST and unknown path | Treated as a miss; 405 and 404 as Problem Details with `requestId` |
+
+Unit tests cover the mapper, ICAO validation, `Retry-After` parsing, the service's cache rules with fakes, the error handler, the guard pipeline (`ResilientCallTest`: time limit, bulkhead, 429 handling, which failures count toward the circuit) and the HTTP client against an in-process WireMock (one case per row of the failure table).
 
 The test profile shrinks every timeout and threshold so the suite runs in seconds.
 
@@ -113,12 +117,12 @@ All under `app.*` in [application.yml](src/main/resources/application.yml). The 
 | --- | --- | --- |
 | `app.provider` | `aviationweather` | |
 | `app.upstream.aviationweather.base-url` | `https://aviationweather.gov` | `UPSTREAM_BASE_URL` |
-| `app.upstream.aviationweather.connect-timeout` / `read-timeout` | 1 s / 2 s | |
-| `app.resilience.time-limit` | 5 s | |
+| `app.upstream.aviationweather.connect-timeout` / `read-timeout` | 1 s / 1.5 s | |
+| `app.resilience.time-limit` | 6 s | |
 | `app.resilience.bulkhead.max-concurrent` | 25 | |
 | `app.resilience.retry.max-attempts` / `initial-backoff` / `max-retry-after` | 3 / 200 ms / 2 s | |
-| `app.resilience.circuit-breaker.*` | window 20, min 10 calls, 50 %, open 30 s | |
-| `app.resilience.rate-limiter.limit-per-minute` | 80 | `UPSTREAM_RATE_LIMIT_PER_MINUTE` |
+| `app.resilience.circuit-breaker.*` | window 20, min 10 calls, 50 %, open 30 s, 2 half-open trial calls | |
+| `app.resilience.rate-limiter.limit-per-minute` / `refresh-period` | 80 / 5 s | `UPSTREAM_RATE_LIMIT_PER_MINUTE` |
 | `app.cache.fresh-for` / `ttl` / `not-found-ttl` | 24 h / 7 d / 10 min | |
 | `spring.data.redis.host` / `password` | `localhost` / none | `REDIS_HOST` / `REDIS_PASSWORD` |
 
@@ -180,12 +184,12 @@ Every cache miss passes these guards, outermost first:
 
 | Guard | Setting | Why |
 | --- | --- | --- |
-| Time limit | 5 s per lookup on a virtual thread. On expiry the call is cancelled (the HTTP call and retry backoff are interrupted) and the lookup returns 504 | Caps the worst case below common gateway timeouts |
+| Time limit | 6 s per lookup on a virtual thread. On expiry the call is cancelled (the HTTP call and retry backoff are interrupted, nothing is retried) and the lookup returns 504. The call is also cancelled if the request thread is interrupted | Caps the worst case below common gateway timeouts. The worst case of the guards below (3 × 1.5 s + backoff, about 5.4 s) fits inside it |
 | Bulkhead | 25 concurrent lookups per instance, no waiting | Protects this service's threads and memory |
 | Retry | 3 attempts, 200 ms × 2 backoff with jitter. Retries timeouts, I/O errors and 5xx. Retries 429 only when `Retry-After` ≤ 2 s, waiting that long | Rides out short blips |
-| Circuit breaker | Window 20, min 10 calls, opens at 50 %, open 30 s | Stops hammering an upstream that is down; answers 503 at once |
-| Rate limiter | 80 calls a minute per instance, 100 ms wait | The upstream blocks clients above 100 a minute. Retries spend permits too |
-| HTTP timeouts | Connect 1 s, response 2 s | One slow call can't eat the whole time budget |
+| Circuit breaker | Window 20, min 10 calls, opens at 50 %, open 30 s, then 2 trial calls | Stops hammering an upstream that is down; answers 503 at once |
+| Rate limiter | 80 calls a minute per instance, refilled 7 at a time every 5 s; 100 ms wait | The upstream blocks clients above 100 a minute. Refilling in small steps means a burst across a minute boundary can't reach 160. Retries spend permits too |
+| HTTP timeouts | Connect 1 s, response 1.5 s | One slow call can't eat the whole time budget |
 
 How each failure is treated:
 
@@ -200,6 +204,8 @@ How each failure is treated:
 | Circuit open | — | — | 503 + `Retry-After` = open duration |
 | Local rate limit or bulkhead full | No | No | 503 + `Retry-After: 1` |
 
+An upstream `Retry-After` is capped at 1 hour.
+
 When attempts fail in different ways, the last one decides the status.
 
 ## Caching
@@ -208,7 +214,7 @@ When attempts fail in different ways, the last one decides the status.
 - Fresh for 24 h: served without calling the upstream (`HIT`).
 - Kept for 7 days: after 24 h the upstream is asked again. If it fails, the old copy is served as `STALE`.
 - "Not found" is remembered for 10 min, and always replaces a stale copy.
-- Redis failures (200 ms command timeout, 500 ms connect timeout) are logged, counted and treated as a miss. The service keeps answering from the upstream.
+- Redis failures (200 ms command timeout, 500 ms connect timeout) and unreadable entries are logged, counted and treated as a miss. The service keeps answering from the upstream.
 - The service takes a `Clock`, so tests can age entries.
 
 ## Observability
@@ -217,12 +223,12 @@ When attempts fail in different ways, the last one decides the status.
 - **Logs**: plain text locally, ECS JSON in Docker. Each upstream call logs the code, outcome and latency; upstream bodies are never logged.
 - **Metrics** (`/actuator/prometheus`):
   - `airport.lookups{outcome, cache}`
-  - `airport.upstream.requests{provider, outcome}` (timer)
+  - `airport.upstream.requests{provider, outcome}` (timer; outcome is `found`, `not_found`, `timeout`, `time_limit`, `io_error`, `server_error`, `forbidden`, `rate_limited`, `client_error`, `bad_response` or `not_called_*`)
   - `airport.cache.errors{operation}`
   - Resilience4j metrics for every guard
   - `http.server.requests`
 - **Health**: readiness doesn't include Redis or the upstream, since the service still answers without them. `/actuator/health` shows both: Redis, and `upstream` with the circuit state (`DEGRADED` while it's open).
-- In Docker, actuator runs on port 8081, published on `127.0.0.1` only.
+- In Docker, actuator runs on port 8081, published on `127.0.0.1` only. Without the `docker` or `dev` profile, only `health` and `info` are exposed and health details are hidden, so a bare `java -jar` doesn't leak metrics or Redis details on the public port.
 
 ## Security
 
@@ -233,7 +239,7 @@ When attempts fail in different ways, the last one decides the status.
   - Multi-stage build on `eclipse-temurin:21-jre-alpine`.
   - Runs as a non-root user with a read-only root filesystem and a tmpfs at `/tmp`.
   - `no-new-privileges` is set, and there's a health check.
-- Redis has a password from an env var and no published port in the full stack.
+- Redis has a password from an env var and no published port in the full stack. The `change-me` default in Compose is a placeholder: set `REDIS_PASSWORD` in `.env` for anything beyond a local run.
 - Dependabot keeps Maven, Docker and Actions dependencies current.
 - No inbound auth or per-client rate limits, because the brief excludes user management. An API gateway in front would own both.
 
@@ -271,7 +277,17 @@ Left out to fit the time budget:
 
 - **Tool:** this project was built with Claude Code.
 - **Planning:** one model (Claude Opus 5.5) wrote the plan and the code. Claude Sonnet 5.5 reviewed the plan; before implementation, Opus 5.5 and Sonnet 5.5 each reviewed it again independently.
-- **Accepted from the reviews:**
+- **Code review:** after implementation, Opus 5.5 and Sonnet 5.5 each reviewed the code. Fixed from it:
+  - Spring's own 404 and 405 errors now use our Problem Details shape.
+  - A `null` upstream body or a `[null]` array is a 502, not a 500.
+  - The time limit now cancels the call even when the caller goes away, and has its own test.
+  - The rate limiter refills in small steps.
+  - The circuit breaker allows 2 trial calls when it half-opens.
+  - Production timeouts fit inside the time limit.
+  - `Retry-After` is capped, and corrupt cache entries read as a miss.
+  - Actuator details stay private outside Docker.
+  - Tests use less tight timeouts, and the guards and HTTP client got unit tests.
+- **Accepted from the plan reviews:**
   - The per-failure retry and circuit-breaker table.
   - Cancelling the timed-out call and carrying the request ID across threads.
   - Test-profile timings and a test for the rate limiter.
@@ -282,6 +298,7 @@ Left out to fit the time budget:
   - A second, in-memory cache.
   - Putting cache state in the response body. It stays in the `X-Cache` header.
   - Merging the two Compose files.
+- **Found by testing, not by review:** Spring's `RestClient` read timeout misbehaving on virtual threads (see Main decisions).
 - **Checked by hand:**
   - The upstream's behaviour, with curl: 200 with a JSON array, 204 for unknown codes, `Cache-Control: max-age=3600`.
   - That the library versions exist on Maven Central.
