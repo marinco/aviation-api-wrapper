@@ -23,7 +23,9 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /** Its own Redis container and Spring context, so pausing Redis can't touch other tests. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "spring.data.redis.timeout=200ms")
 @ActiveProfiles("test")
 class RedisDownIT {
 
