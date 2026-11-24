@@ -38,9 +38,14 @@ class AviationWeatherClientTest {
     @BeforeEach
     void setUp() {
         server.resetAll();
-        var properties = new AviationWeatherProperties(
-                server.baseUrl(), Duration.ofSeconds(1), Duration.ofMillis(300), "test-agent");
-        client = new AviationWeatherClient(
+        // Generous: a cold WireMock on a CI runner can take hundreds of ms for its first answers.
+        client = clientWithReadTimeout(Duration.ofSeconds(2));
+    }
+
+    private static AviationWeatherClient clientWithReadTimeout(Duration readTimeout) {
+        var properties =
+                new AviationWeatherProperties(server.baseUrl(), Duration.ofSeconds(1), readTimeout, "test-agent");
+        return new AviationWeatherClient(
                 HttpClient.newHttpClient(), properties, JsonMapper.builder().build(), Clock.systemUTC());
     }
 
@@ -103,7 +108,8 @@ class AviationWeatherClientTest {
 
     @Test
     void slowResponseIsATimeout() {
-        answer(json("[]").withFixedDelay(1000));
+        client = clientWithReadTimeout(Duration.ofMillis(200));
+        answer(json("[]").withFixedDelay(1500));
         assertKind(Kind.TIMEOUT);
     }
 
