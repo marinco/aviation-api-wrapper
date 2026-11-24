@@ -1,0 +1,89 @@
+spring:
+  application:
+    name: aviation-api-wrapper
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 200ms
+      connect-timeout: 500ms
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+app:
+  # Which AirportProvider adapter is active.
+  provider: aviationweather
+  upstream:
+    aviationweather:
+      base-url: ${UPSTREAM_BASE_URL:https://aviationweather.gov}
+      connect-timeout: 1s
+      read-timeout: 2s
+      user-agent: aviation-api-wrapper/0.1 (+https://github.com/marinco/aviation-api-wrapper)
+  resilience:
+    time-limit: 5s
+    bulkhead:
+      max-concurrent: 25
+    retry:
+      max-attempts: 3
+      initial-backoff: 200ms
+      multiplier: 2.0
+      jitter: 0.5
+      max-retry-after: 2s
+    circuit-breaker:
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      open-duration: 30s
+    rate-limiter:
+      # The upstream blocks clients above 100/min. Per instance: with N replicas use 80/N.
+      limit-per-minute: ${UPSTREAM_RATE_LIMIT_PER_MINUTE:80}
+      timeout: 100ms
+  cache:
+    fresh-for: 24h
+    ttl: 7d
+    not-found-ttl: 10m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      status:
+        order: down,out-of-service,degraded,unknown,up
+        http-mapping:
+          degraded: 200
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: Airport lookup by ICAO code
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{requestId:-}]"

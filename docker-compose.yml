@@ -1,0 +1,35 @@
+# Full stack: the app plus Redis. `docker compose up --build`, or scripts/run.sh.
+services:
+  app:
+    build: .
+    image: ${APP_IMAGE:-aviation-api:local}
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me}
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-https://aviationweather.gov}
+      UPSTREAM_RATE_LIMIT_PER_MINUTE: ${UPSTREAM_RATE_LIMIT_PER_MINUTE:-80}
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:8081:8081" # actuator: local only
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    # No persistence: the cache can always be rebuilt from upstream.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-change-me}", "--save", "", "--appendonly", "no"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-change-me}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped

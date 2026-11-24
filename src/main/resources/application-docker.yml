@@ -1,0 +1,9 @@
+# Used in the container. Actuator moves to its own port, which Compose binds to 127.0.0.1 only.
+management:
+  server:
+    port: 8081
+
+logging:
+  structured:
+    format:
+      console: ecs
