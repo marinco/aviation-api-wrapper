@@ -1,4 +1,6 @@
 # Dependencies only, for running the app from the IDE or with scripts/dev.sh.
+# Own project name, so it never touches the full stack from docker-compose.yml.
+name: aviation-api-dev
 services:
   redis:
     image: redis:8-alpine

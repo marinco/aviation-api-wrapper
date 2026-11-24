@@ -139,6 +139,7 @@ Unit tests cover the mapper, validation, `Retry-After` parsing, the service's ca
 - **No MapStruct or Lombok:** records cover the value types, and the mapper is mostly rules that MapStruct would hide.
 - **Data assumptions:** `elev` is in metres and runway `dimension` is `LENGTHxWIDTH` in feet, as in the real response. Surface codes other than `A` and `C` map to `UNKNOWN`.
 - **Freshness:** airport data rarely changes, so 24 h fresh and 7 days stale are acceptable.
+- **Upstream latency:** measured on 2026-11-24 over 20 requests, the median was 0.38 s but p90 was 10 s. Slow responses take about 10 s, not 2 s, so a longer timeout wouldn't help: failing fast at 1.5 s and retrying does. A lookup that is slow on all three attempts returns 504, or `STALE` if cached.
 
 **Next steps:**
 - A shared rate limiter in Redis; today the limit is per instance, so with N replicas set `UPSTREAM_RATE_LIMIT_PER_MINUTE` to 80/N.
