@@ -177,6 +177,7 @@ The domain knows nothing about HTTP, Redis or Resilience4j. Provider failures co
 | Virtual threads | Upstream calls block; virtual threads make that cheap |
 | JDK `HttpClient` directly, not Spring's `RestClient` | `RestClient`'s read timeout for the JDK client cancelled fast requests at exactly the timeout when called from virtual threads (reproduced against the real upstream), and it reports timeouts as generic I/O errors. The JDK client's per-request timeout throws `HttpTimeoutException`, which maps cleanly to 504 |
 | Spring Boot 4.2 / Java 21 | Current Boot line; Java 21 is LTS |
+| No MapStruct or Lombok | Records already cover the value types. The upstream mapper is mostly rules (trimming, runway parsing, surface codes), so MapStruct would save almost nothing and hide them. Lombok would save a few constructor and logger lines at the cost of an annotation processor and an IDE plugin |
 
 ## Resilience and error handling
 
