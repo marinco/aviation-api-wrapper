@@ -1,0 +1,84 @@
+spring:
+  application:
+    name: aviation-api-wrapper
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 200ms
+      connect-timeout: 500ms
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+app:
+  # Which AirportProvider adapter is active.
+  provider: aviationweather
+  upstream:
+    aviationweather:
+      base-url: ${UPSTREAM_BASE_URL:https://aviationweather.gov}
+      connect-timeout: 1s
+      read-timeout: 1500ms
+      user-agent: aviation-api-wrapper/0.1 (+https://github.com/marinco/aviation-api-wrapper)
+  # Worst case per lookup: 3 attempts x 1.5 s read timeout + backoff (up to about 0.9 s), or one 429 wait of up to 2 s.
+  resilience:
+    retry:
+      max-attempts: 3
+      initial-backoff: 200ms
+      multiplier: 2.0
+      jitter: 0.5
+      max-retry-after: 2s
+    circuit-breaker:
+      sliding-window-size: 20
+      minimum-number-of-calls: 10
+      failure-rate-threshold: 50
+      open-duration: 30s
+      permitted-calls-in-half-open: 2
+    rate-limiter:
+      # The upstream blocks clients above 100/min. Per instance: with N replicas use 80/N.
+      limit-per-minute: ${UPSTREAM_RATE_LIMIT_PER_MINUTE:80}
+      # Permits refill every 5 s (7 at a time for 80/min), so no burst can reach twice the limit.
+      refresh-period: 5s
+      timeout: 100ms
+  cache:
+    fresh-for: 24h
+    ttl: 7d
+    not-found-ttl: 10m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # The docker and dev profiles add metrics and prometheus, on a port that isn't public.
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: Airport lookup by ICAO code
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{requestId:-}]"

@@ -1,0 +1,18 @@
+# Local development against the Redis from docker-compose.dev.yml.
+spring:
+  data:
+    redis:
+      password: ${REDIS_PASSWORD:devpassword}
+
+logging:
+  level:
+    io.github.marinco.aviation: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always

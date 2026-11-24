@@ -1,0 +1,16 @@
+# Dependencies only, for running the app from the IDE or with scripts/dev.sh.
+# Own project name, so it never touches the full stack from docker-compose.yml.
+name: aviation-api-dev
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-devpassword}", "--save", "", "--appendonly", "no"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-devpassword}
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

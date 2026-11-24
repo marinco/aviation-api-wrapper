@@ -1,0 +1,31 @@
+package io.github.marinco.aviation.provider.resilience;
+
+import java.time.Duration;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+/** Guard settings for provider calls. Every number is configurable; tests shrink them. */
+@ConfigurationProperties("app.resilience")
+public record ResilienceProperties(Retry retry, CircuitBreaker circuitBreaker, RateLimiter rateLimiter) {
+
+    /**
+     * @param maxAttempts total attempts, the first one included
+     * @param maxRetryAfter a 429 is retried only when its {@code Retry-After} is at most this long
+     */
+    public record Retry(
+            int maxAttempts, Duration initialBackoff, double multiplier, double jitter, Duration maxRetryAfter) {}
+
+    /** @param permittedCallsInHalfOpen trial calls let through after the open period before deciding again */
+    public record CircuitBreaker(
+            int slidingWindowSize,
+            int minimumNumberOfCalls,
+            float failureRateThreshold,
+            Duration openDuration,
+            int permittedCallsInHalfOpen) {}
+
+    /**
+     * @param limitPerMinute the average rate; permits are handed out per {@code refreshPeriod} in proportion
+     * @param refreshPeriod how often permits refill
+     * @param timeout how long a call may wait for a permit
+     */
+    public record RateLimiter(int limitPerMinute, Duration refreshPeriod, Duration timeout) {}
+}

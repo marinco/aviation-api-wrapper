@@ -1,0 +1,25 @@
+# Small numbers so the integration suite runs in seconds, but no single response has to beat a tight
+# timeout: a cold WireMock on a CI runner can take a few hundred ms for its first answer.
+spring:
+  data:
+    redis:
+      # Production uses 200 ms; a busy CI runner can be slower, and tests flush Redis through this connection.
+      # RedisDownIT sets 200 ms back, since it pauses Redis on purpose.
+      timeout: 2s
+
+app:
+  upstream:
+    aviationweather:
+      connect-timeout: 1s
+      read-timeout: 1s
+  resilience:
+    retry:
+      initial-backoff: 10ms
+      jitter: 0.1
+    circuit-breaker:
+      sliding-window-size: 4
+      minimum-number-of-calls: 4
+      open-duration: 2s
+    rate-limiter:
+      # High, so tests sharing one context never run out of permits. RateLimitIT sets its own.
+      limit-per-minute: 10000

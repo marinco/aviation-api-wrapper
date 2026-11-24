@@ -1,0 +1,21 @@
+### Found (first MISS, then HIT)
+GET http://localhost:8080/api/v1/airports/KJFK
+X-Request-Id: demo-1
+
+### Lower case is accepted
+GET http://localhost:8080/api/v1/airports/egll
+
+### Unknown code: 404
+GET http://localhost:8080/api/v1/airports/ZZZZ
+
+### Invalid code: 400
+GET http://localhost:8080/api/v1/airports/KJ%2A
+
+### Readiness (Docker: management port, localhost only)
+GET http://127.0.0.1:8081/actuator/health/readiness
+
+### Health with Redis and upstream circuit details
+GET http://127.0.0.1:8081/actuator/health
+
+### Metrics
+GET http://127.0.0.1:8081/actuator/prometheus
