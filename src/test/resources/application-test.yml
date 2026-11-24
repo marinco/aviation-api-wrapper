@@ -6,8 +6,6 @@ app:
       connect-timeout: 1s
       read-timeout: 1s
   resilience:
-    # Above test 5's 1 s Retry-After wait and test 8's three 1 s timeouts. TimeLimitIT sets its own.
-    time-limit: 5s
     retry:
       initial-backoff: 10ms
       jitter: 0.1

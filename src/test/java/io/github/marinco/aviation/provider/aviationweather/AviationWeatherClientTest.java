@@ -5,16 +5,11 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
-import io.github.marinco.aviation.domain.exception.UpstreamBadResponseException;
-import io.github.marinco.aviation.domain.exception.UpstreamClientException;
-import io.github.marinco.aviation.domain.exception.UpstreamForbiddenException;
-import io.github.marinco.aviation.domain.exception.UpstreamRateLimitedException;
-import io.github.marinco.aviation.domain.exception.UpstreamServerException;
-import io.github.marinco.aviation.domain.exception.UpstreamTimeoutException;
+import io.github.marinco.aviation.domain.exception.UpstreamException;
+import io.github.marinco.aviation.domain.exception.UpstreamException.Kind;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
@@ -82,36 +77,46 @@ class AviationWeatherClientTest {
     @Test
     void unreadableBodiesAreBadResponses() {
         answer(json("not json"));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamBadResponseException.class);
+        assertKind(Kind.BAD_RESPONSE);
 
         answer(json("null"));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamBadResponseException.class);
+        assertKind(Kind.BAD_RESPONSE);
 
         answer(json("{\"icaoId\":\"KJFK\"}"));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamBadResponseException.class);
+        assertKind(Kind.BAD_RESPONSE);
     }
 
     @Test
     void statusCodesMapToTypedFailures() {
         answer(aResponse().withStatus(403));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamForbiddenException.class);
+        assertKind(Kind.FORBIDDEN);
 
         answer(aResponse().withStatus(400));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamClientException.class);
+        assertKind(Kind.CLIENT_ERROR);
 
         answer(aResponse().withStatus(503));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamServerException.class);
+        assertKind(Kind.SERVER_ERROR);
 
         answer(aResponse().withStatus(429).withHeader("Retry-After", "3"));
-        assertThatThrownBy(() -> client.fetch("KJFK"))
-                .isInstanceOfSatisfying(
-                        UpstreamRateLimitedException.class,
-                        e -> assertThat(e.retryAfter()).isEqualTo(Duration.ofSeconds(3)));
+        assertThat(failure().retryAfter()).isEqualTo(Duration.ofSeconds(3));
     }
 
     @Test
     void slowResponseIsATimeout() {
         answer(json("[]").withFixedDelay(1000));
-        assertThatThrownBy(() -> client.fetch("KJFK")).isInstanceOf(UpstreamTimeoutException.class);
+        assertKind(Kind.TIMEOUT);
+    }
+
+    private UpstreamException failure() {
+        try {
+            client.fetch("KJFK");
+        } catch (UpstreamException e) {
+            return e;
+        }
+        throw new AssertionError("expected an UpstreamException");
+    }
+
+    private void assertKind(Kind kind) {
+        assertThat(failure().kind()).isEqualTo(kind);
     }
 }

@@ -30,11 +30,8 @@ app:
       connect-timeout: 1s
       read-timeout: 1500ms
       user-agent: aviation-api-wrapper/0.1 (+https://github.com/marinco/aviation-api-wrapper)
+  # Worst case per lookup: 3 attempts x 1.5 s read timeout + backoff (up to about 0.9 s), or one 429 wait of up to 2 s.
   resilience:
-    # Worst case: 3 attempts x 1.5 s read timeout + backoff (about 0.3 s + 0.6 s with jitter) = about 5.4 s.
-    time-limit: 6s
-    bulkhead:
-      max-concurrent: 25
     retry:
       max-attempts: 3
       initial-backoff: 200ms
@@ -69,10 +66,6 @@ management:
       show-details: never
       probes:
         enabled: true
-      status:
-        order: down,out-of-service,degraded,unknown,up
-        http-mapping:
-          degraded: 200
   info:
     env:
       enabled: true

@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.marinco.aviation.domain.exception.AirportNotFoundException;
-import io.github.marinco.aviation.domain.exception.UpstreamServerException;
+import io.github.marinco.aviation.domain.exception.UpstreamException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -71,7 +71,7 @@ class AirportServiceTest {
         Instant old = NOW.minus(Duration.ofHours(25));
         cache.entries.put("KJFK", new AirportCache.Found(KJFK, old));
         provider.answer = icao -> {
-            throw new UpstreamServerException(500);
+            throw UpstreamException.serverError(500);
         };
 
         LookupResult result = service.lookup("KJFK");
@@ -84,10 +84,10 @@ class AirportServiceTest {
     @Test
     void failureWithNothingCachedPropagates() {
         provider.answer = icao -> {
-            throw new UpstreamServerException(503);
+            throw UpstreamException.serverError(503);
         };
 
-        assertThatThrownBy(() -> service.lookup("KJFK")).isInstanceOf(UpstreamServerException.class);
+        assertThatThrownBy(() -> service.lookup("KJFK")).isInstanceOf(UpstreamException.class);
     }
 
     @Test

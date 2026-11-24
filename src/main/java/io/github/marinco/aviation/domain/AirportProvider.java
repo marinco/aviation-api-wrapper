@@ -7,7 +7,7 @@ import java.util.Optional;
  * {@code app.provider} property.
  *
  * <p>Implementations return {@link Optional#empty()} when the provider says the airport doesn't exist, and throw an
- * {@link io.github.marinco.aviation.domain.exception.UpstreamException} subtype when the lookup itself failed.
+ * {@link io.github.marinco.aviation.domain.exception.UpstreamException} when the lookup itself failed.
  */
 public interface AirportProvider {
 

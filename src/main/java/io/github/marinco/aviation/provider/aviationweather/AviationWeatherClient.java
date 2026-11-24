@@ -1,12 +1,6 @@
 package io.github.marinco.aviation.provider.aviationweather;
 
-import io.github.marinco.aviation.domain.exception.UpstreamBadResponseException;
-import io.github.marinco.aviation.domain.exception.UpstreamClientException;
-import io.github.marinco.aviation.domain.exception.UpstreamForbiddenException;
-import io.github.marinco.aviation.domain.exception.UpstreamIoException;
-import io.github.marinco.aviation.domain.exception.UpstreamRateLimitedException;
-import io.github.marinco.aviation.domain.exception.UpstreamServerException;
-import io.github.marinco.aviation.domain.exception.UpstreamTimeoutException;
+import io.github.marinco.aviation.domain.exception.UpstreamException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -19,7 +13,6 @@ import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CancellationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
@@ -66,14 +59,13 @@ class AviationWeatherClient {
             response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
         } catch (HttpTimeoutException e) {
             log.warn("Upstream lookup {} timed out after {} ms", icao, ms(started));
-            throw new UpstreamTimeoutException("Upstream timed out", e);
+            throw UpstreamException.timeout(e);
         } catch (IOException e) {
             log.warn("Upstream lookup {} failed after {} ms: {}", icao, ms(started), e.toString());
-            throw new UpstreamIoException("Upstream I/O error", e);
+            throw UpstreamException.ioError(e);
         } catch (InterruptedException e) {
-            // The time limit cancelled us. Not an upstream failure: not retried, not counted by the circuit breaker.
             Thread.currentThread().interrupt();
-            throw new CancellationException("Upstream call cancelled");
+            throw UpstreamException.ioError(e);
         }
         log.info("Upstream lookup {} -> {} in {} ms", icao, response.statusCode(), ms(started));
         return handle(icao, response);
@@ -94,17 +86,17 @@ class AviationWeatherClient {
             return parse(icao, response.body());
         }
         if (status == 429) {
-            throw new UpstreamRateLimitedException(RetryAfter.parse(
+            throw UpstreamException.rateLimited(RetryAfter.parse(
                     response.headers().firstValue("Retry-After").orElse(null), clock));
         }
         if (status == 403) {
             log.error("Upstream answered 403 for {}: this service may be blocked", icao);
-            throw new UpstreamForbiddenException();
+            throw UpstreamException.forbidden();
         }
         if (status >= 500) {
-            throw new UpstreamServerException(status);
+            throw UpstreamException.serverError(status);
         }
-        throw new UpstreamClientException(status);
+        throw UpstreamException.clientError(status);
     }
 
     private Optional<AviationWeatherAirportDto> parse(String icao, byte[] body) {
@@ -114,14 +106,14 @@ class AviationWeatherClient {
         try {
             List<AviationWeatherAirportDto> airports = jsonMapper.readValue(body, AIRPORT_LIST);
             if (airports == null) {
-                throw new UpstreamBadResponseException("Upstream body was JSON null", null);
+                throw UpstreamException.badResponse("Upstream body was JSON null", null);
             }
             return airports.stream()
                     .filter(Objects::nonNull)
                     .filter(a -> a.icaoId() != null && a.icaoId().trim().equalsIgnoreCase(icao))
                     .findFirst();
         } catch (JacksonException e) {
-            throw new UpstreamBadResponseException("Upstream body could not be parsed", e);
+            throw UpstreamException.badResponse("Upstream body could not be parsed", e);
         }
     }
 

@@ -3,13 +3,7 @@ package io.github.marinco.aviation.api;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.marinco.aviation.domain.exception.AirportNotFoundException;
-import io.github.marinco.aviation.domain.exception.LookupTimeoutException;
-import io.github.marinco.aviation.domain.exception.UpstreamBadResponseException;
-import io.github.marinco.aviation.domain.exception.UpstreamForbiddenException;
-import io.github.marinco.aviation.domain.exception.UpstreamRateLimitedException;
-import io.github.marinco.aviation.domain.exception.UpstreamServerException;
-import io.github.marinco.aviation.domain.exception.UpstreamTimeoutException;
-import io.github.marinco.aviation.domain.exception.UpstreamUnavailableException;
+import io.github.marinco.aviation.domain.exception.UpstreamException;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -47,32 +41,21 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void localRefusalIs503WithRetryAfter() {
-        var e = new UpstreamUnavailableException(
-                UpstreamUnavailableException.Reason.CIRCUIT_OPEN, Duration.ofSeconds(30), null);
-
-        ResponseEntity<ProblemDetail> response = handler.unavailable(e);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(503);
-        assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("30");
+    void notCallingUpstreamIs503WithRetryAfter() {
+        for (UpstreamException e : new UpstreamException[] {
+            UpstreamException.circuitOpen(Duration.ofSeconds(30), null),
+            UpstreamException.localRateLimit(Duration.ofSeconds(30), null),
+            UpstreamException.rateLimited(Duration.ofSeconds(30))
+        }) {
+            ResponseEntity<ProblemDetail> response = handler.upstreamFailed(e);
+            assertThat(response.getStatusCode().value()).isEqualTo(503);
+            assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("30");
+        }
     }
 
     @Test
-    void upstream429Is503WithItsRetryAfter() {
-        ResponseEntity<ProblemDetail> response =
-                handler.rateLimited(new UpstreamRateLimitedException(Duration.ofSeconds(30)));
-
-        assertThat(response.getStatusCode().value()).isEqualTo(503);
-        assertThat(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER)).isEqualTo("30");
-    }
-
-    @Test
-    void timeoutsAre504() {
-        assertThat(handler.timeout(new LookupTimeoutException(Duration.ofSeconds(5), null))
-                        .getStatusCode()
-                        .value())
-                .isEqualTo(504);
-        assertThat(handler.timeout(new UpstreamTimeoutException("t", null))
+    void timeoutIs504() {
+        assertThat(handler.upstreamFailed(UpstreamException.timeout(null))
                         .getStatusCode()
                         .value())
                 .isEqualTo(504);
@@ -80,13 +63,14 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void otherUpstreamFailuresAre502WithoutUpstreamText() {
-        for (var e : new RuntimeException[] {
-            new UpstreamServerException(500),
-            new UpstreamForbiddenException(),
-            new UpstreamBadResponseException("secret upstream text", null)
+        for (UpstreamException e : new UpstreamException[] {
+            UpstreamException.serverError(500),
+            UpstreamException.forbidden(),
+            UpstreamException.ioError(null),
+            UpstreamException.clientError(400),
+            UpstreamException.badResponse("secret upstream text", null)
         }) {
-            ResponseEntity<ProblemDetail> response =
-                    handler.upstreamFailed((io.github.marinco.aviation.domain.exception.UpstreamException) e);
+            ResponseEntity<ProblemDetail> response = handler.upstreamFailed(e);
             assertThat(response.getStatusCode().value()).isEqualTo(502);
             assertThat(response.getBody().getDetail()).doesNotContain("secret");
         }

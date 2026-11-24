@@ -5,11 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Guard settings for provider calls. Every number is configurable; tests shrink them. */
 @ConfigurationProperties("app.resilience")
-public record ResilienceProperties(
-        Duration timeLimit, Bulkhead bulkhead, Retry retry, CircuitBreaker circuitBreaker, RateLimiter rateLimiter) {
-
-    /** @param maxConcurrent lookups in flight per instance before new ones get 503 */
-    public record Bulkhead(int maxConcurrent) {}
+public record ResilienceProperties(Retry retry, CircuitBreaker circuitBreaker, RateLimiter rateLimiter) {
 
     /**
      * @param maxAttempts total attempts, the first one included

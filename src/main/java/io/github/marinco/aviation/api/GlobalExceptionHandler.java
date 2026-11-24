@@ -1,11 +1,7 @@
 package io.github.marinco.aviation.api;
 
 import io.github.marinco.aviation.domain.exception.AirportNotFoundException;
-import io.github.marinco.aviation.domain.exception.LookupTimeoutException;
 import io.github.marinco.aviation.domain.exception.UpstreamException;
-import io.github.marinco.aviation.domain.exception.UpstreamRateLimitedException;
-import io.github.marinco.aviation.domain.exception.UpstreamTimeoutException;
-import io.github.marinco.aviation.domain.exception.UpstreamUnavailableException;
 import java.net.URI;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -65,46 +61,30 @@ class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .build();
     }
 
-    @ExceptionHandler(UpstreamUnavailableException.class)
-    ResponseEntity<ProblemDetail> unavailable(UpstreamUnavailableException e) {
-        log.warn("Provider not called: {}", e.reason());
-        return problem(
-                        HttpStatus.SERVICE_UNAVAILABLE,
-                        "upstream-unavailable",
-                        "Airport data temporarily unavailable",
-                        "Try again later.")
-                .retryAfter(e.retryAfter())
-                .build();
-    }
-
-    @ExceptionHandler(UpstreamRateLimitedException.class)
-    ResponseEntity<ProblemDetail> rateLimited(UpstreamRateLimitedException e) {
-        log.warn("Provider rate limited us; Retry-After {} s", e.retryAfter().toSeconds());
-        return problem(
-                        HttpStatus.SERVICE_UNAVAILABLE,
-                        "upstream-unavailable",
-                        "Airport data temporarily unavailable",
-                        "Try again later.")
-                .retryAfter(e.retryAfter())
-                .build();
-    }
-
-    @ExceptionHandler({LookupTimeoutException.class, UpstreamTimeoutException.class})
-    ResponseEntity<ProblemDetail> timeout(UpstreamException e) {
-        log.warn("Provider timed out: {}", e.getMessage());
-        return problem(
-                        HttpStatus.GATEWAY_TIMEOUT,
-                        "upstream-timeout",
-                        "Airport data provider timed out",
-                        "Try again later.")
-                .build();
-    }
-
+    /** One place decides the status for every upstream failure; the README's failure table mirrors it. */
     @ExceptionHandler(UpstreamException.class)
     ResponseEntity<ProblemDetail> upstreamFailed(UpstreamException e) {
-        log.warn("Provider failed: {}", e.getMessage());
-        return problem(HttpStatus.BAD_GATEWAY, "upstream-error", "Airport data provider failed", "Try again later.")
-                .build();
+        log.warn("Provider failed ({}): {}", e.kind(), e.getMessage());
+        return switch (e.kind()) {
+            case TIMEOUT ->
+                problem(
+                                HttpStatus.GATEWAY_TIMEOUT,
+                                "upstream-timeout",
+                                "Airport data provider timed out",
+                                "Try again later.")
+                        .build();
+            case RATE_LIMITED, CIRCUIT_OPEN, LOCAL_RATE_LIMIT ->
+                problem(
+                                HttpStatus.SERVICE_UNAVAILABLE,
+                                "upstream-unavailable",
+                                "Airport data temporarily unavailable",
+                                "Try again later.")
+                        .retryAfter(e.retryAfter())
+                        .build();
+            case IO_ERROR, SERVER_ERROR, FORBIDDEN, CLIENT_ERROR, BAD_RESPONSE ->
+                problem(HttpStatus.BAD_GATEWAY, "upstream-error", "Airport data provider failed", "Try again later.")
+                        .build();
+        };
     }
 
     @ExceptionHandler(Exception.class)
@@ -134,6 +114,9 @@ class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         }
 
         Builder retryAfter(Duration retryAfter) {
+            if (retryAfter == null) {
+                return this;
+            }
             long seconds = Math.max(1, retryAfter.toSeconds() + (retryAfter.toNanosPart() > 0 ? 1 : 0));
             headers.set(HttpHeaders.RETRY_AFTER, Long.toString(seconds));
             return this;
