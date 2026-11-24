@@ -3,6 +3,7 @@ package io.github.marinco.aviation.it;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import io.github.marinco.aviation.domain.Airport;
 import io.github.marinco.aviation.domain.AirportCache;
@@ -25,7 +26,7 @@ class AirportLookupIT extends IntegrationTestBase {
     MeterRegistry meters;
 
     @Test
-    void test01_knownAirportIsFetchedOnceThenServedFromRedis() {
+    void knownAirportIsFetchedOnceThenServedFromRedis() {
         stubFound("KJFK");
 
         client.get()
@@ -69,7 +70,7 @@ class AirportLookupIT extends IntegrationTestBase {
     }
 
     @Test
-    void test02_unknownAirportIs404AndRemembered() {
+    void unknownAirportIs404AndRemembered() {
         UPSTREAM.register(airportRequest("ZZZZ").willReturn(aResponse().withStatus(204)));
 
         for (int i = 0; i < 2; i++) {
@@ -92,7 +93,7 @@ class AirportLookupIT extends IntegrationTestBase {
 
     @ParameterizedTest
     @ValueSource(strings = {"KJ*", "KJFK,EGLL", "KJF", "KJFKX"})
-    void test03_invalidCodesAre400AndNeverReachUpstream(String code) {
+    void invalidCodesAre400AndNeverReachUpstream(String code) {
         client.get()
                 .uri("/api/v1/airports/{icao}", code)
                 .exchange()
@@ -106,7 +107,7 @@ class AirportLookupIT extends IntegrationTestBase {
     }
 
     @Test
-    void test04_serverErrorsAreRetried() {
+    void serverErrorsAreRetried() {
         UPSTREAM.register(airportRequest("KJFK")
                 .inScenario("flaky")
                 .whenScenarioStateIs(STARTED)
@@ -131,7 +132,7 @@ class AirportLookupIT extends IntegrationTestBase {
     }
 
     @Test
-    void test05a_shortUpstreamRateLimitIsWaitedOut() {
+    void shortUpstreamRateLimitIsWaitedOut() {
         UPSTREAM.register(airportRequest("KJFK")
                 .inScenario("429")
                 .whenScenarioStateIs(STARTED)
@@ -151,7 +152,7 @@ class AirportLookupIT extends IntegrationTestBase {
     }
 
     @Test
-    void test05b_longUpstreamRateLimitIs503WithoutTrippingTheCircuit() {
+    void longUpstreamRateLimitIs503WithoutTrippingTheCircuit() {
         UPSTREAM.register(
                 airportRequest("KJFK").willReturn(aResponse().withStatus(429).withHeader("Retry-After", "30")));
 
@@ -169,7 +170,7 @@ class AirportLookupIT extends IntegrationTestBase {
     }
 
     @Test
-    void test08_slowUpstreamIs504AndNothingKeepsRunning() throws InterruptedException {
+    void slowUpstreamIs504AndNothingKeepsRunning() {
         UPSTREAM.register(airportRequest("KJFK")
                 .willReturn(aResponse()
                         .withStatus(200)
@@ -186,14 +187,13 @@ class AirportLookupIT extends IntegrationTestBase {
                 .jsonPath("$.type")
                 .isEqualTo("urn:aviation-api:problem:upstream-timeout");
 
-        int callsAtResponse = upstreamCalls();
-        Thread.sleep(600);
-        assertThat(callsAtResponse).isEqualTo(3);
-        assertThat(upstreamCalls()).isEqualTo(callsAtResponse);
+        assertThat(upstreamCalls()).isEqualTo(3);
+        // Nothing may still be retrying in the background: the count must stay at 3.
+        await().during(Duration.ofMillis(600)).atMost(Duration.ofSeconds(2)).until(() -> upstreamCalls() == 3);
     }
 
     @Test
-    void test09_staleCopyIsServedWhenUpstreamFails() {
+    void staleCopyIsServedWhenUpstreamFails() {
         Airport kjfk = new Airport(
                 "KJFK", "JFK", "Kennedy", new Location("NY", "US", 40.6, -73.7, 4), List.of(), "aviationweather.gov");
         cache.put("KJFK", kjfk, Instant.now().minus(Duration.ofHours(25)));

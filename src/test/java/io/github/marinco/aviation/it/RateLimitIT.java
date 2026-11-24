@@ -12,7 +12,7 @@ import org.springframework.test.context.TestPropertySource;
 class RateLimitIT extends IntegrationTestBase {
 
     @Test
-    void test11_localRateLimitProtectsUpstream() {
+    void localRateLimitProtectsUpstream() {
         stubFound("KAAA");
         stubFound("KBBB");
         stubFound("KCCC");

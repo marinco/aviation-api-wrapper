@@ -37,7 +37,7 @@ class CircuitBreakerIT extends IntegrationTestBase {
     }
 
     @Test
-    void test06_failingUpstreamOpensTheCircuit() {
+    void failingUpstreamOpensTheCircuit() {
         openCircuit();
 
         int callsWhileOpen = upstreamCalls();
@@ -64,7 +64,7 @@ class CircuitBreakerIT extends IntegrationTestBase {
     }
 
     @Test
-    void test07_circuitRecoversWhenUpstreamDoes() {
+    void circuitRecoversWhenUpstreamDoes() {
         openCircuit();
 
         String code = nextCode();

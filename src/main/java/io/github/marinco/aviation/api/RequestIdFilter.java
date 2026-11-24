@@ -19,10 +19,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public class RequestIdFilter extends OncePerRequestFilter {
+class RequestIdFilter extends OncePerRequestFilter {
 
-    public static final String HEADER = "X-Request-Id";
-    public static final String MDC_KEY = "requestId";
+    static final String HEADER = "X-Request-Id";
+    static final String MDC_KEY = "requestId";
     private static final Pattern SAFE = Pattern.compile("^[A-Za-z0-9-]{1,64}$");
 
     @Override

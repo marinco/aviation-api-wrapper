@@ -111,7 +111,9 @@ Redis key `airport:v1:{ICAO}`, value JSON `{airport, fetchedAt}`.
 - **Container:** non-root user, read-only filesystem, `no-new-privileges`.
 - **Redis:** requires a password; the Compose default `change-me` is a placeholder.
 - **Upstream:** HTTPS, no redirects, a custom `User-Agent`.
-- **Auth:** no inbound auth, because the brief excludes user management; a gateway would own it.
+- **Auth and per-client limits:** none, because the brief excludes user management; a gateway would own both.
+- **Known abuse path:** one client requesting many different valid-looking codes can use up the shared 80/min upstream budget, so other clients' cache misses get 503. Caching "not found" only helps with repeated codes. A per-client limit at the gateway is the fix.
+- **Swagger UI and `/v3/api-docs`** are public on port 8080. They describe only the public API; disable them with `springdoc.api-docs.enabled=false` and `springdoc.swagger-ui.enabled=false` if that's unwanted.
 
 ## Tests
 
@@ -143,6 +145,7 @@ Unit tests cover the mapper, validation, `Retry-After` parsing, the service's ca
 
 **Next steps:**
 - A shared rate limiter in Redis; today the limit is per instance, so with N replicas set `UPSTREAM_RATE_LIMIT_PER_MINUTE` to 80/N.
+- Per-client rate limiting (at a gateway, or with a Redis-backed bucket keyed by client).
 - Request coalescing for concurrent misses.
 - A circuit breaker around Redis.
 - CodeQL and Trivy in CI.
